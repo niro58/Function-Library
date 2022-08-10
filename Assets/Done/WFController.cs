@@ -16,10 +16,10 @@ public class WFController : EditorWindow
 
     public int lastValue;
     public int lastUpdatedValue;
-    [MenuItem("Window/Wave Function Collapse")]
+    [MenuItem("Library/Wave Function Collapse")]
     public static void ShowWindow()
     {
-        GetWindow<WFController>("Edit Mode Functions");
+        GetWindow<WFController>("Wave Function Collapse");
     }
     private void OnGUI()
     {
@@ -66,12 +66,19 @@ public class WFController : EditorWindow
                 {
                     tileRules.Add(tile, new TileRule());
                 }
+                tileRules[tile].probability += 1;
                 tileRules[tile].AddSurroundedTiles(refTilemap, pos);
             }
         }
-        
+        int prob = 0;
         foreach(KeyValuePair<TileBase,TileRule> rule in tileRules)
         {
+            prob += rule.Value.probability;
+            rule.Value.probability = prob;
+        }
+        foreach(KeyValuePair<TileBase,TileRule> rule in tileRules)
+        {
+            //Debug.Log(rule.Key.name + "!" + rule.Value.probability);
             foreach(KeyValuePair<TileBase,Direction> allowedTile in rule.Value.allowedTiles)
             {
                 Debug.Log("Parent : " +  rule.Key.name + "+" + allowedTile.Key + "!" + allowedTile.Value);
@@ -84,42 +91,39 @@ public class WFController : EditorWindow
         genTilemap.ClearAllTiles();
         tiles.Clear();
         tiles.Add(new Vector3Int(0, 0, 1), tileRules.Keys.ToArray());
-        while (tiles.Count != 0)
+        int step = 1;
+        while (tiles.Count != 0 && step < 10000)
         {
             Vector3Int lowestEntropyVector = GetLowestEntropy();
             TileBase[] selectedTilePossibilities = tiles[lowestEntropyVector];
             TileBase selectedRandTile = GetRandomTile(selectedTilePossibilities);
-            
-            if (selectedRandTile == null || !CalculateEntropy(lowestEntropyVector,selectedRandTile)) break;
             genTilemap.SetTile(lowestEntropyVector, selectedRandTile);
             generatedTile.Add(lowestEntropyVector, selectedRandTile);
             tiles.Remove(lowestEntropyVector);
-            RecalculateEntropy(lowestEntropyVector);
+            RecalculateEntropy(lowestEntropyVector, step);
+            step++;
         }
     }
-    private bool CalculateEntropy(Vector3Int pos, TileBase tile)
-    {
-        TileRule rule = tileRules[tile];
-        foreach(KeyValuePair<TileBase,Direction> allowedTile in rule.allowedTiles) {
-            Vector3Int dir = TileRule.GetVectorByDirection(allowedTile.Value);
-            if(genTilemap.GetTile(dir) == null) continue;
-            return false;
-        }
-        return true;
-    }
-    private void RecalculateEntropy(Vector3Int position)
+    private void RecalculateEntropy(Vector3Int position, int step)
     {
         for(int x = -1; x <= 1; x++)
         {
-            for (int y = -1; y <= 1; y++)
+            for (int y = -1; y <= 1; y++)// Get All Surrounded Tiles
             {
                 Vector3Int pos = position + new Vector3Int(x, y, 0);
                 pos.z = 1;
-                if (pos.x > 25 || pos.y > 25 || pos.x < -25 || pos.y < -25) continue;
+                // If tile is already created move to the next one
                 if ((x != 0 && y != 0) || genTilemap.GetTile(pos)) continue;
+
+                // If it is first time doing something with this tile, add him to array
                 if (!tiles.ContainsKey(pos)) tiles.Add(pos, tileRules.Keys.ToArray());
-                List<TileBase> possibleTiles = tiles[pos].ToList();
+
+                // Get all possible tiles of this array
+                List<TileBase> possibleTiles = tiles[pos].ToList();// Get all possible tiles of this array
+
+                // Get opposite direction of values x and y , so we can check what tiles are compatible with it
                 Direction dir = TileRule.GetDirectionByVector(new Vector3Int(-x, -y, 0));
+
                 int index = 0;
                 while (index < possibleTiles.Count)
                 {
@@ -131,7 +135,12 @@ public class WFController : EditorWindow
                     }
                     possibleTiles.RemoveAt(index);
                 }
-                if (possibleTiles.Count == 0) continue;
+                if (possibleTiles.Count == 0)
+                {
+                    tiles.Remove(pos);
+                    continue;
+                }
+                //Debug.Log(step + "Position " + pos + " 1Has " + possibleTiles.Count());
                 tiles[pos] = possibleTiles.ToArray();
 
             }
@@ -140,14 +149,29 @@ public class WFController : EditorWindow
     private TileBase GetRandomTile(TileBase[] tileArray)
     {
         if (tileArray.Count() == 0) return null;
-        return tileArray[UnityEngine.Random.Range(0, tileArray.Length - 1)];
+        if (tileArray.Count() == 1) return tileArray[0];
+        int rollNum = 0;
+        Dictionary<TileBase, int> rollNums = new Dictionary<TileBase, int>();
+        foreach(TileBase tile in tileArray)
+        {
+            rollNum += tileRules[tile].probability;
+            rollNums.Add(tile, rollNum);
+        }
+        return rollNums.Where(x => GetRandomNumber(0, rollNum) <= x.Value).First().Key;
+    }
+    private int GetRandomNumber(int from, int to)
+    {
+        UnityEngine.Random.InitState(DateTime.Now.Millisecond);
+        return UnityEngine.Random.Range(from, to);
     }
     private Vector3Int GetLowestEntropy()
     {
         Dictionary<Vector3Int, TileBase[]> lowestEntropyTiles = new Dictionary<Vector3Int, TileBase[]>();
         lowestEntropyTiles = tiles.Where(x => x.Value.Length == tiles.Min(x => x.Value.Length)).ToDictionary(t => t.Key, t => t.Value);
+        
         if (lowestEntropyTiles.Count == 0) return Vector3Int.zero;
-        return lowestEntropyTiles.ElementAt(UnityEngine.Random.Range(0, lowestEntropyTiles.Count - 1)).Key;
+        int rand = GetRandomNumber(0, lowestEntropyTiles.Count);
+        return lowestEntropyTiles.ElementAt(rand).Key;
     }
     private void CreateTilemap()
     {
@@ -165,6 +189,7 @@ public class WFController : EditorWindow
 public class TileRule
 {
     public Dictionary<TileBase,Direction> allowedTiles = new Dictionary<TileBase,Direction>();
+    public int probability;
     public TileRule()
     {
     }
